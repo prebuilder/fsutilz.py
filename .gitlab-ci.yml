@@ -1,0 +1,58 @@
+#image: pypy:latest
+image: registry.gitlab.com/kolanich-subgroups/docker-images/fixed_python:latest
+stages:
+  - dependencies
+  - build
+  - test
+  - trigger
+
+variables:
+  DOCKER_DRIVER: overlay2
+  SAST_ANALYZER_IMAGE_TAG: latest
+  SAST_DISABLE_DIND: "true"
+
+include:
+  - template: SAST.gitlab-ci.yml
+  #- template: DAST.gitlab-ci.yml
+  #- template: License-Management.gitlab-ci.yml
+  #- template: Container-Scanning.gitlab-ci.yml
+  #- template: Dependency-Scanning.gitlab-ci.yml
+  - template: Code-Quality.gitlab-ci.yml
+
+
+build:
+  tags:
+    - shared
+  stage: build
+  variables:
+    GIT_DEPTH: "1"
+    PYTHONUSERBASE: ${CI_PROJECT_DIR}/python_user_packages
+
+  before_script:
+    - export PYTHON_MODULES_DIR=${PYTHONUSERBASE}/lib/python3.7
+    - export EXECUTABLE_DEPENDENCIES_DIR=${PYTHONUSERBASE}/bin
+    - export PATH="$PATH:$EXECUTABLE_DEPENDENCIES_DIR" # don't move into `variables` any of them, it is unordered
+    - mkdir ./wheels
+    - pip install --upgrade --pre --user git+https://gitlab.com/KOLANICH/AnyVer.py.git
+
+  script:
+    - python3 ./setup.py bdist_wheel
+    - mv ./dist/*.whl ./wheels/fsutilz-0.CI_python-py3-none-any.whl
+    - pip3 install --upgrade --pre --user ./wheels/fsutilz-0.CI_python-py3-none-any.whl
+    - coverage run --source=fsutilz --branch -m pytest --junitxml=./rspec.xml ./tests/tests.py
+    - coverage report -m
+    - coverage xml
+
+  coverage: /^TOTAL\\s+.+?(\\d{1,3}%)$/
+
+  cache:
+    paths:
+      - $PYTHONUSERBASE
+
+  artifacts:
+    paths:
+      - wheels
+    reports:
+      junit: ./rspec.xml
+      cobertura: ./coverage.xml
+
